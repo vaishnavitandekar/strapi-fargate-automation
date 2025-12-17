@@ -4,6 +4,15 @@ resource "aws_ecr_repository" "this" {
 
 resource "aws_ecs_cluster" "this" {
   name = "strapi-cluster-vaishnavii"
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+
+  tags = {
+    Name = "strapi-cluster-vaishnavii"
+  }
+
 }
 
 resource "aws_iam_role" "task" {
@@ -64,10 +73,20 @@ resource "aws_ecs_task_definition" "task" {
         }
       ]
 
+      healthCheck = {
+        command     = ["CMD-SHELL", "wget -qO- http://localhost:1337 || exit 1"]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 90
+      }
+
+
+
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = "/ecs/strapi"
+          awslogs-group         = aws_cloudwatch_log_group.ecs.name
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "ecs"
         }
@@ -122,6 +141,12 @@ resource "aws_ecs_service" "service" {
 resource "aws_cloudwatch_log_group" "ecs" {
   name              = "/ecs/strapi"
   retention_in_days = 7
+
+  lifecycle {
+    prevent_destroy = false
+    ignore_changes  = [name]
+  }
+
 }
 
 resource "aws_cloudwatch_metric_alarm" "ecs_high_cpu" {
@@ -177,3 +202,5 @@ resource "aws_cloudwatch_dashboard" "ecs_dashboard" {
     ]
   })
 }
+
+
