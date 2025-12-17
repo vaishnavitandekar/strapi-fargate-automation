@@ -1,0 +1,74 @@
+name: Terraform + ECS Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: terraform-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: ap-south-1
+      TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
+      TF_VAR_admin_jwt_secret: ${{ secrets.TF_VAR_ADMIN_JWT_SECRET }}
+      TF_VAR_jwt_secret: ${{ secrets.TF_VAR_JWT_SECRET }}
+      TF_VAR_api_token_salt: ${{ secrets.TF_VAR_API_TOKEN_SALT }}
+      TF_VAR_transfer_token_salt: ${{ secrets.TF_VAR_TRANSFER_TOKEN_SALT }}
+      TF_VAR_app_keys: ${{ secrets.TF_VAR_APP_KEYS }}
+      TF_VAR_encryption_key: ${{ secrets.TF_VAR_ENCRYPTION_KEY }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+      
+      - name: Terraform Plan
+        working-directory: terraform
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: terraform apply -auto-approve
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push Docker Image
+        run: |
+          IMAGE_TAG=${GITHUB_SHA}
+          ECR_REPO=${{ steps.login-ecr.outputs.registry }}/vaishnavi-ecs-strapii
+
+          docker build -t $ECR_REPO:$IMAGE_TAG .
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REPO:latest
+
+          docker push $ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REPO:latest
+
+      - name: Deploy to ECS
+        run: |
+          aws ecs update-service \
+            --cluster strapi-cluster-vaishnavii \
+            --service strapi-service-vaishnavii \
+            --force-new-deployment
